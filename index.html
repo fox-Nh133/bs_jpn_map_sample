@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ボーイスカウト団検索デモ</title>
+    <title>ボーイスカウト団検索</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
@@ -11,11 +11,8 @@
     
     <style>
         body { margin: 0; padding: 0; font-family: "Helvetica Neue", Arial, sans-serif; }
-        
-        /* 地図を全画面表示 */
         #map { height: 100vh; width: 100%; z-index: 1; }
 
-        /* 検索オーバーレイのデザイン（前回と同じ） */
         .search-container {
             position: absolute;
             top: 20%;
@@ -30,6 +27,7 @@
             box-shadow: 0 4px 15px rgba(0,0,0,0.3);
             text-align: center;
             color: white;
+            transition: all 0.3s ease; /* アニメーション用 */
         }
 
         .search-container h1 {
@@ -78,13 +76,12 @@
             background: rgba(255,255,255,0.1);
         }
 
-        /* 検索結果が出たときにデザインを変更するクラス */
+        /* 検索結果表示時のスタイル */
         body.has-results .search-container {
-            top: 20px; /* 上部に固定 */
+            top: 20px;
             left: 50%;
             transform: translate(-50%, 0);
             padding: 15px;
-            transition: all 0.3s ease;
             margin-top: 10px;
             background: rgba(45, 0, 75, 0.95);
         }
@@ -108,66 +105,70 @@
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
 <script>
-    // --- 1. データ準備 ---
-    // ★ここに、Pythonで作成した全件分のJSONデータをコピペしてください★
-    // 下記はデモ用のサンプルデータです。
-    const scoutData = [
-        { "Name": "函館第3団", "Address": "北海道函館市新八幡町156-1", "lat": 41.7869, "lng": 140.7370, "Description": "主な活動場所: 法龍寺" },
-        { "Name": "函館第8団", "Address": "北海道函館市富岡町3丁目25-13", "lat": 41.8050, "lng": 140.7580, "Description": "主な活動場所: 本現寺" },
-        { "Name": "室蘭第1団", "Address": "北海道室蘭市中央町3-5-9", "lat": 42.3152, "lng": 140.9738, "Description": "主な活動場所: 本教寺" },
-        { "Name": "札幌第1団", "Address": "北海道札幌市中央区宮ヶ丘474", "lat": 43.0543, "lng": 141.3060, "Description": "主な活動場所: 北海道神宮境内" },
-        { "Name": "札幌第22団", "Address": "北海道札幌市西区琴似3条6丁目", "lat": 43.0780, "lng": 141.3030, "Description": "主な活動場所: 浄恩寺" }
-        // ... ここに全データを貼り付け ...
-    ];
+    // --- グローバル変数 ---
+    let scoutData = []; 
+    let markersLayer;   
+    let locationCircleLayer = null;
 
-    // --- 2. 地図の初期化 ---
-    // 初期表示は日本全体が見えるように設定
+    // --- 1. 地図の初期化 ---
     const map = L.map('map').setView([36.5, 138], 5);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
 
-    // ★Marker Cluster Groupの作成★
-    let markersLayer = L.markerClusterGroup({
-        showCoverageOnHover: false, // マウスオーバー時に範囲ポリゴンを表示しない
-        maxClusterRadius: 50 // クラスタリングする範囲（ピクセル）を少し広めに設定
+    markersLayer = L.markerClusterGroup({
+        showCoverageOnHover: false,
+        maxClusterRadius: 50
     });
-    
-    // 現在地表示用の円レイヤー管理
-    let locationCircleLayer = null;
 
-    // --- 3. マーカー表示関数 (修正版) ---
+    // --- 2. JSONデータの読み込み ---
+    fetch('./scout_data_geocoded.json')
+        .then(response => {
+            if (!response.ok) throw new Error(response.status);
+            return response.json();
+        })
+        .then(data => {
+            scoutData = data;
+            // 読み込み完了時、最初は全件表示
+            showMarkers(scoutData); 
+        })
+        .catch(err => {
+            console.error("JSON読み込み失敗:", err);
+            alert("データの読み込みに失敗しました。ローカルサーバー環境か確認してください。");
+        });
+
+
+    // --- 3. マーカー表示関数（通常の一覧表示用） ---
     function showMarkers(data) {
-        // 既存のマーカーレイヤーをクリア
         markersLayer.clearLayers();
-        
-        // 現在地の円があれば削除
         if(locationCircleLayer) {
             map.removeLayer(locationCircleLayer);
             locationCircleLayer = null;
         }
 
-        if (data.length === 0) {
+        if (!data || data.length === 0) {
             alert("該当する団が見つかりませんでした");
-            document.body.classList.remove('has-results');
             return;
         }
 
-        // 範囲調整用のBoundsオブジェクト
         const bounds = L.latLngBounds();
         let markerCount = 0;
 
         data.forEach(item => {
-            // 緯度経度が数値として有効か確認
             const lat = parseFloat(item.lat);
             const lng = parseFloat(item.lng);
 
             if (!isNaN(lat) && !isNaN(lng)) {
-                const marker = L.marker([lat, lng])
-                    .bindPopup(`<b>${item.Name}</b><br>${item.Address}<br><small>${item.Description}</small>`);
-                
-                // ★個別のマーカーをCluster Groupに追加★
+                const popupContent = `
+                    <div style="font-size:14px; line-height:1.5;">
+                        <b style="font-size:16px; color:#2d004b;">${item.Name}</b><br>
+                        ${item.Address}<br>
+                        <hr style="margin:5px 0; border:none; border-top:1px solid #ccc;">
+                        ${item.Description.replace(/\n/g, '<br>')}
+                    </div>
+                `;
+                const marker = L.marker([lat, lng]).bindPopup(popupContent);
                 markersLayer.addLayer(marker);
                 bounds.extend([lat, lng]);
                 markerCount++;
@@ -175,110 +176,144 @@
         });
 
         if (markerCount > 0) {
-            // ★完成したCluster Groupを地図に追加★
             map.addLayer(markersLayer);
-            
-            // マーカーが含まれる範囲にズーム
-            map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
-            document.body.classList.add('has-results'); // デザイン変更
+            const maxZoom = (data.length > 100) ? 8 : 15; 
+            map.fitBounds(bounds, { padding: [50, 50], maxZoom: maxZoom });
+            document.body.classList.add('has-results');
         }
     }
 
-    // 初期ロード時に全データを表示（オプション）
-    // これをコメントアウトすれば、最初は地図だけ表示されます。
-    showMarkers(scoutData);
-
-
-    // --- 4. 検索機能 ---
+    // --- 4. 検索機能（郵便番号対応版） ---
     function performSearch() {
-        const keywordInput = document.getElementById('searchInput');
-        const keyword = keywordInput.value.trim();
-        
+        if (scoutData.length === 0) return;
+
+        const input = document.getElementById('searchInput');
+        const keyword = input.value.trim();
+
         if (!keyword) {
-             // キーワードが空なら全件表示に戻す
              showMarkers(scoutData);
              document.body.classList.remove('has-results');
              return;
         }
 
-        // 名前か住所にキーワードが含まれるデータを抽出
-        const result = scoutData.filter(item => {
-            // データが文字列であることを保証して検索
-            const name = String(item.Name);
-            const address = String(item.Address);
-            return name.includes(keyword) || address.includes(keyword);
-        });
-
-        showMarkers(result);
+        // ▼ 郵便番号判定ロジック (3桁-4桁 または 7桁数字)
+        const zipPattern = /^\d{3}-?\d{4}$/;
+        
+        if (zipPattern.test(keyword)) {
+            // 郵便番号APIを叩く
+            searchByPostalCode(keyword);
+        } else {
+            // 通常のキーワード検索
+            const result = scoutData.filter(item => {
+                const name = String(item.Name || "");
+                const address = String(item.Address || "");
+                return name.includes(keyword) || address.includes(keyword);
+            });
+            showMarkers(result);
+        }
     }
 
-    // Enterキーでも検索できるようにする
-    document.getElementById('searchInput').addEventListener('keypress', function (e) {
-        if (e.key === 'Enter') {
-            performSearch();
-        }
-    });
+    // --- 5. 郵便番号検索 API連携 ---
+    function searchByPostalCode(zipcode) {
+        // ハイフン除去
+        const cleanZip = zipcode.replace('-', '');
+        
+        // HeartRails Geo APIを使用 (CORS対応、JSONP不要)
+        const apiUrl = `https://geoapi.heartrails.com/api/json?method=searchByPostal&postal=${cleanZip}`;
 
-    // --- 5. 現在地機能 ---
+        fetch(apiUrl)
+            .then(res => res.json())
+            .then(data => {
+                if (!data.response || !data.response.location || data.response.location.length === 0) {
+                    alert("その郵便番号は見つかりませんでした。");
+                    return;
+                }
+                // 見つかった場所の緯度経度を取得
+                const loc = data.response.location[0];
+                const lat = parseFloat(loc.y); // HeartRailsは x=経度, y=緯度
+                const lng = parseFloat(loc.x);
+                
+                // その周辺を探す関数を呼ぶ
+                searchNearby(lat, lng, `郵便番号: ${zipcode} の周辺`);
+            })
+            .catch(err => {
+                console.error("API Error:", err);
+                alert("郵便番号検索に失敗しました。");
+            });
+    }
+
+    // --- 6. 指定座標の周辺を探す関数（現在地・郵便番号 共用） ---
+    function searchNearby(lat, lng, title) {
+        markersLayer.clearLayers();
+
+        // 中心点の円を描画
+        if(locationCircleLayer) map.removeLayer(locationCircleLayer);
+        locationCircleLayer = L.circle([lat, lng], {
+            color: '#e27d60', // 色を少し変更
+            fillColor: '#e27d60',
+            fillOpacity: 0.2,
+            radius: 5000 
+        }).addTo(map);
+        
+        map.setView([lat, lng], 11);
+
+        // 距離計算 & ソート
+        const sortedData = scoutData
+            .filter(item => !isNaN(parseFloat(item.lat)) && !isNaN(parseFloat(item.lng)))
+            .map(item => {
+                const itemLat = parseFloat(item.lat);
+                const itemLng = parseFloat(item.lng);
+                const dist = Math.sqrt(Math.pow(itemLat - lat, 2) + Math.pow(itemLng - lng, 2));
+                return { ...item, dist: dist, _lat: itemLat, _lng: itemLng };
+            })
+            .sort((a, b) => a.dist - b.dist);
+
+        // 近い10件を表示
+        const nearbyData = sortedData.slice(0, 10);
+        
+        nearbyData.forEach(item => {
+                const popupContent = `
+                <b>${item.Name}</b><br>
+                <span style="color:#e27d60; font-size:0.8em;">${title}から近い</span><br>
+                ${item.Address}<br>
+                <hr style="margin:5px 0; border:none; border-top:1px solid #ccc;">
+                <a href="${item.URL}" target="_blank">団の詳細を見る</a>
+                `;
+                const marker = L.marker([item._lat, item._lng]).bindPopup(popupContent);
+                markersLayer.addLayer(marker);
+        });
+        map.addLayer(markersLayer);
+        document.body.classList.add('has-results');
+    }
+
+    // --- 7. 現在地機能 ---
     function useMyLocation() {
         if (!navigator.geolocation) {
             alert("お使いのブラウザは位置情報に対応していません");
             return;
         }
+        
+        if (scoutData.length === 0) return;
 
-        // 検索窓をクリアしてUIを戻す
         document.getElementById('searchInput').value = "";
-        document.body.classList.remove('has-results');
-
+        
         navigator.geolocation.getCurrentPosition(position => {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
             
-            // 既存のマーカーを一旦クリア
-            markersLayer.clearLayers();
-
-            // 現在地に青い円を表示して地図移動
-            if(locationCircleLayer) map.removeLayer(locationCircleLayer);
-            locationCircleLayer = L.circle([lat, lng], {
-                color: '#4285F4',
-                fillColor: '#4285F4',
-                fillOpacity: 0.2,
-                radius: 3000 // 半径3km
-            }).addTo(map);
-            
-            map.setView([lat, lng], 12); // 適度なズームレベル
-
-            // 単純な距離計算で近い順にソート（簡易実装）
-            const sortedData = scoutData
-                .filter(item => !isNaN(parseFloat(item.lat)) && !isNaN(parseFloat(item.lng)))
-                .map(item => {
-                    const itemLat = parseFloat(item.lat);
-                    const itemLng = parseFloat(item.lng);
-                    // 簡易的なユークリッド距離（正確な地理的距離ではないが近い順は出る）
-                    const dist = Math.sqrt(Math.pow(itemLat - lat, 2) + Math.pow(itemLng - lng, 2));
-                    return { ...item, dist: dist, _latNum: itemLat, _lngNum: itemLng };
-                }).sort((a, b) => a.dist - b.dist);
-
-            // 近い10件を表示（数を増やしました）
-            const nearbyData = sortedData.slice(0, 10);
-            
-            // 近い団のマーカーを追加
-            nearbyData.forEach(item => {
-                 const marker = L.marker([item._latNum, item._lngNum])
-                    .bindPopup(`<b>${item.Name}</b><br>ここから近い団です<br><small>${item.Address}</small>`);
-                markersLayer.addLayer(marker);
-            });
-            map.addLayer(markersLayer);
+            // 共通関数を呼び出し
+            searchNearby(lat, lng, "現在地");
 
         }, (error) => {
-            console.error("Error getting location:", error);
-            alert("位置情報を取得できませんでした。ブラウザの設定を確認してください。");
-        }, {
-            enableHighAccuracy: true, // 高精度モードを試みる
-            timeout: 5000,
-            maximumAge: 0
-        });
+            console.error(error);
+            alert("位置情報を取得できませんでした。");
+        }, { enableHighAccuracy: true });
     }
+
+    // Enterキー対応
+    document.getElementById('searchInput').addEventListener('keypress', function (e) {
+        if (e.key === 'Enter') performSearch();
+    });
 </script>
 
 </body>
