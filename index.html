@@ -11,7 +11,67 @@
     
     <style>
         body { margin: 0; padding: 0; font-family: "Helvetica Neue", Arial, sans-serif; }
-        #map { height: 100vh; width: 100%; z-index: 1; }
+        .map-container { 
+            display: flex; 
+            height: 100vh; 
+        }
+        #map { 
+            height: 100vh; 
+            flex: 1;
+            z-index: 1; 
+        }
+        .info-column {
+            width: 300px;
+            background: #f8f9fa;
+            border-left: 1px solid #ddd;
+            overflow-y: auto;
+            padding: 10px;
+            box-sizing: border-box;
+            display: none;
+        }
+        .info-item {
+            background: white;
+            margin-bottom: 10px;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s ease;
+        }
+        .info-item:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            border-color: #66bb6a;
+        }
+        .info-item .name {
+            font-weight: bold;
+            font-size: 14px;
+            color: #2d004b;
+            margin-bottom: 5px;
+        }
+        .info-item .address {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+        .detail-btn {
+            display: inline-block;
+            background-color: #4caf50;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: bold;
+            transition: background-color 0.2s ease;
+        }
+        .detail-btn:hover {
+            background-color: #45a049;
+        }
+
+        body.has-results .info-column {
+            display: block;
+        }
 
         .search-container {
             position: absolute;
@@ -20,7 +80,7 @@
             transform: translate(-50%, -50%);
             width: 90%;
             max-width: 600px;
-            background: rgba(45, 0, 75, 0.9);
+            background: rgba(46, 125, 50, 0.9);
             padding: 30px;
             border-radius: 8px;
             z-index: 1000;
@@ -51,7 +111,7 @@
 
         button.search-btn {
             padding: 15px 25px;
-            background-color: #e27d60;
+            background-color: #66bb6a;
             color: white;
             border: none;
             border-radius: 4px;
@@ -79,11 +139,12 @@
         /* 検索結果表示時のスタイル */
         body.has-results .search-container {
             top: 20px;
-            left: 50%;
-            transform: translate(-50%, 0);
+            left: 20px;
+            transform: none;
             padding: 15px;
             margin-top: 10px;
-            background: rgba(45, 0, 75, 0.95);
+            background: rgba(46, 125, 50, 0.95);
+            max-width: 400px;
         }
         body.has-results .search-container h1 { display: none; }
     </style>
@@ -99,7 +160,10 @@
     <button class="location-btn" onclick="useMyLocation()">現在地から探す ⌖</button>
 </div>
 
-<div id="map"></div>
+<div class="map-container">
+    <div id="map"></div>
+    <div class="info-column" id="infoColumn"></div>
+</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
@@ -109,9 +173,31 @@
     let scoutData = []; 
     let markersLayer;   
     let locationCircleLayer = null;
+    let currentMarkers = []; // 現在表示中のマーカー情報を保持
 
     // --- 1. 地図の初期化 ---
-    const map = L.map('map').setView([36.5, 138], 5);
+    const map = L.map('map', {
+        scrollWheelZoom: false // デフォルトでスクロールズーム無効
+    }).setView([35.6094, 139.7308], 6); // 全国が見える程度のズーム
+
+    // iframeかどうかを判定してスクロールズームの挙動を変更
+    if (window.parent !== window) {
+        // iframe内の場合、Ctrl+スクロールでズーム
+        map.on('wheel', function(e) {
+            if (e.originalEvent.ctrlKey) {
+                e.originalEvent.preventDefault();
+                const delta = e.originalEvent.deltaY;
+                if (delta < 0) {
+                    map.zoomIn();
+                } else {
+                    map.zoomOut();
+                }
+            }
+        });
+    } else {
+        // 通常のページの場合、スクロールズーム有効
+        map.scrollWheelZoom.enable();
+    }
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -129,9 +215,19 @@
             return response.json();
         })
         .then(data => {
+            // データ読み込み時にDescriptionから詳細URLを削除
+            data.forEach(item => {
+                if (item.Description) {
+                    const lines = item.Description.split('\n');
+                    const filteredLines = lines.filter(line => !line.trim().startsWith('詳細URL:'));
+                    item.Description = filteredLines.join('\n').trim();
+                }
+            });
+            
             scoutData = data;
-            // 読み込み完了時、最初は全件表示
-            showMarkers(scoutData); 
+            // 初期状態では全件表示するがhas-resultsクラスは付けない
+            addAllMarkers(scoutData);
+            console.log('データ読み込み完了:', data.length, '件');
         })
         .catch(err => {
             console.error("JSON読み込み失敗:", err);
@@ -139,9 +235,51 @@
         });
 
 
+    // --- 初期表示用マーカー表示関数（情報カラムは表示しない） ---
+    function addAllMarkers(data) {
+        markersLayer.clearLayers();
+        currentMarkers = [];
+
+        if (!data || data.length === 0) return;
+
+        data.forEach(item => {
+            const lat = parseFloat(item.lat);
+            const lng = parseFloat(item.lng);
+
+            if (!isNaN(lat) && !isNaN(lng)) {
+                const popupContent = `
+                    <div style="font-size:14px; line-height:1.5;">
+                        <b style="font-size:16px; color:#2d004b;">${item.Name}</b><br>
+                        ${item.Address}<br>
+                        <hr style="margin:5px 0; border:none; border-top:1px solid #ccc;">
+                        ${item.Description.replace(/\n/g, '<br>')}
+                        ${item.URL ? `<br><a href="${item.URL}" target="_blank" class="detail-btn">団の情報をみる</a>` : ''}
+                    </div>
+                `;
+                const marker = L.marker([lat, lng]).bindPopup(popupContent);
+                markersLayer.addLayer(marker);
+                
+                // マーカー情報を保存
+                currentMarkers.push({
+                    item: item,
+                    marker: marker,
+                    lat: lat,
+                    lng: lng
+                });
+            }
+        });
+
+        if (currentMarkers.length > 0) {
+            map.addLayer(markersLayer);
+            // 初期表示では位置変更しない、has-resultsクラスも付けない
+        }
+    }
+
+
     // --- 3. マーカー表示関数（通常の一覧表示用） ---
     function showMarkers(data) {
         markersLayer.clearLayers();
+        currentMarkers = [];
         if(locationCircleLayer) {
             map.removeLayer(locationCircleLayer);
             locationCircleLayer = null;
@@ -149,6 +287,7 @@
 
         if (!data || data.length === 0) {
             alert("該当する団が見つかりませんでした");
+            updateInfoColumn([]);
             return;
         }
 
@@ -166,20 +305,34 @@
                         ${item.Address}<br>
                         <hr style="margin:5px 0; border:none; border-top:1px solid #ccc;">
                         ${item.Description.replace(/\n/g, '<br>')}
+                        ${item.URL ? `<br><a href="${item.URL}" target="_blank" class="detail-btn">団の情報をみる</a>` : ''}
                     </div>
                 `;
                 const marker = L.marker([lat, lng]).bindPopup(popupContent);
                 markersLayer.addLayer(marker);
                 bounds.extend([lat, lng]);
                 markerCount++;
+                
+                // マーカー情報を保存
+                currentMarkers.push({
+                    item: item,
+                    marker: marker,
+                    lat: lat,
+                    lng: lng
+                });
             }
         });
 
         if (markerCount > 0) {
             map.addLayer(markersLayer);
+            // 検索時のみfitBoundsを実行
             const maxZoom = (data.length > 100) ? 8 : 15; 
             map.fitBounds(bounds, { padding: [50, 50], maxZoom: maxZoom });
             document.body.classList.add('has-results');
+            
+            // マップ移動・ズーム時の情報カラム更新
+            map.on('moveend zoomend', updateInfoColumnForCurrentView);
+            updateInfoColumnForCurrentView();
         }
     }
 
@@ -191,8 +344,8 @@
         const keyword = input.value.trim();
 
         if (!keyword) {
+             // 空の検索の場合は全ピンを表示してhas-resultsを有効にする
              showMarkers(scoutData);
-             document.body.classList.remove('has-results');
              return;
         }
 
@@ -245,12 +398,13 @@
     // --- 6. 指定座標の周辺を探す関数（現在地・郵便番号 共用） ---
     function searchNearby(lat, lng, title) {
         markersLayer.clearLayers();
+        currentMarkers = [];
 
         // 中心点の円を描画
         if(locationCircleLayer) map.removeLayer(locationCircleLayer);
         locationCircleLayer = L.circle([lat, lng], {
-            color: '#e27d60', // 色を少し変更
-            fillColor: '#e27d60',
+            color: '#4caf50',
+            fillColor: '#4caf50',
             fillOpacity: 0.2,
             radius: 5000 
         }).addTo(map);
@@ -274,16 +428,29 @@
         nearbyData.forEach(item => {
                 const popupContent = `
                 <b>${item.Name}</b><br>
-                <span style="color:#e27d60; font-size:0.8em;">${title}から近い</span><br>
+                <span style="color:#4caf50; font-size:0.8em;">${title}から近い</span><br>
                 ${item.Address}<br>
                 <hr style="margin:5px 0; border:none; border-top:1px solid #ccc;">
-                <a href="${item.URL}" target="_blank">団の詳細を見る</a>
+                ${item.Description ? item.Description.replace(/\n/g, '<br>') : ''}
+                ${item.URL ? `<br><a href="${item.URL}" target="_blank" class="detail-btn">団の情報をみる</a>` : ''}
                 `;
                 const marker = L.marker([item._lat, item._lng]).bindPopup(popupContent);
                 markersLayer.addLayer(marker);
+                
+                // マーカー情報を保存
+                currentMarkers.push({
+                    item: item,
+                    marker: marker,
+                    lat: item._lat,
+                    lng: item._lng
+                });
         });
         map.addLayer(markersLayer);
         document.body.classList.add('has-results');
+        
+        // マップ移動・ズーム時の情報カラム更新
+        map.on('moveend zoomend', updateInfoColumnForCurrentView);
+        updateInfoColumnForCurrentView();
     }
 
     // --- 7. 現在地機能 ---
@@ -314,6 +481,59 @@
     document.getElementById('searchInput').addEventListener('keypress', function (e) {
         if (e.key === 'Enter') performSearch();
     });
+
+    // --- 情報カラム関連の関数 ---
+    function updateInfoColumnForCurrentView() {
+        const mapBounds = map.getBounds();
+        const mapCenter = map.getCenter();
+        
+        // 現在の表示範囲内のマーカーのみを取得
+        const visibleMarkers = currentMarkers.filter(markerData => {
+            return mapBounds.contains([markerData.lat, markerData.lng]);
+        });
+        
+        // 中心からの距離順でソート
+        const sortedMarkers = visibleMarkers.map(markerData => {
+            const distance = mapCenter.distanceTo([markerData.lat, markerData.lng]);
+            return {
+                ...markerData,
+                distanceFromCenter: distance
+            };
+        }).sort((a, b) => a.distanceFromCenter - b.distanceFromCenter);
+        
+        updateInfoColumn(sortedMarkers);
+    }
+
+    function updateInfoColumn(markerDataList) {
+        const infoColumn = document.getElementById('infoColumn');
+        infoColumn.innerHTML = '';
+        
+        if (markerDataList.length === 0) {
+            infoColumn.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">表示範囲内にボーイスカウト団がありません</div>';
+            return;
+        }
+        
+        markerDataList.forEach(markerData => {
+            const infoItem = document.createElement('div');
+            infoItem.className = 'info-item';
+            
+            const distanceText = '';
+            
+            infoItem.innerHTML = `
+                <div class="name">${markerData.item.Name}</div>
+                <div class="address">${markerData.item.Address}</div>
+                ${markerData.item.URL ? `<a href="${markerData.item.URL}" target="_blank" class="detail-btn">団の情報をみる</a>` : ''}
+            `;
+            
+            // クリックでマーカーにフォーカス
+            infoItem.addEventListener('click', () => {
+                map.setView([markerData.lat, markerData.lng], Math.max(map.getZoom(), 15));
+                markerData.marker.openPopup();
+            });
+            
+            infoColumn.appendChild(infoItem);
+        });
+    }
 </script>
 
 </body>
