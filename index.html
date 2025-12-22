@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ボーイスカウト団検索</title>
     <script>
-        if (/Android|webOS|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) && !/iPad|Android.*Tablet/i.test(navigator.userAgent)) {
+        if (window.self === window.top && /Android|webOS|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) && !/iPad|Android.*Tablet/i.test(navigator.userAgent)) {
             window.location.href = 'mobile.html';
         }
     </script>
