@@ -222,6 +222,34 @@
     let locationCircleLayer = null;
     let currentMarkers = [];
 
+    // --- セキュリティ関数 ---
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function escapeHtmlWithBr(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML.replace(/\n/g, '<br>');
+    }
+
+    function escapeUrl(url) {
+        if (!url) return '';
+        try {
+            const urlObj = new URL(url);
+            if (urlObj.protocol !== 'http:' && urlObj.protocol !== 'https:') {
+                return '';
+            }
+            return escapeHtml(url);
+        } catch (e) {
+            return '';
+        }
+    }
+
     // --- 1. 地図の初期化 ---
     const map = L.map('map', {
         scrollWheelZoom: true,
@@ -277,11 +305,11 @@
             if (!isNaN(lat) && !isNaN(lng)) {
                 const popupContent = `
                     <div style="font-size:14px; line-height:1.5;">
-                        <b style="font-size:16px; color:#2d004b;">${item.Name}</b><br>
-                        ${item.Address}<br>
+                        <b style="font-size:16px; color:#2d004b;">${escapeHtml(item.Name)}</b><br>
+                        ${escapeHtml(item.Address)}<br>
                         <hr style="margin:5px 0; border:none; border-top:1px solid #ccc;">
-                        ${item.Description.replace(/\n/g, '<br>')}
-                        ${item.URL ? `<br><a href="${item.URL}" target="_blank" class="detail-btn">団の情報をみる</a>` : ''}
+                        ${escapeHtmlWithBr(item.Description)}
+                        ${item.URL ? `<br><a href="${escapeUrl(item.URL)}" target="_blank" class="detail-btn">団の情報をみる</a>` : ''}
                     </div>
                 `;
                 const marker = L.marker([lat, lng]).bindPopup(popupContent);
@@ -326,11 +354,11 @@
             if (!isNaN(lat) && !isNaN(lng)) {
                 const popupContent = `
                     <div style="font-size:14px; line-height:1.5;">
-                        <b style="font-size:16px; color:#2d004b;">${item.Name}</b><br>
-                        ${item.Address}<br>
+                        <b style="font-size:16px; color:#2d004b;">${escapeHtml(item.Name)}</b><br>
+                        ${escapeHtml(item.Address)}<br>
                         <hr style="margin:5px 0; border:none; border-top:1px solid #ccc;">
-                        ${item.Description.replace(/\n/g, '<br>')}
-                        ${item.URL ? `<br><a href="${item.URL}" target="_blank" class="detail-btn">団の情報をみる</a>` : ''}
+                        ${escapeHtmlWithBr(item.Description)}
+                        ${item.URL ? `<br><a href="${escapeUrl(item.URL)}" target="_blank" class="detail-btn">団の情報をみる</a>` : ''}
                     </div>
                 `;
                 const marker = L.marker([lat, lng]).bindPopup(popupContent);
@@ -437,12 +465,12 @@
         
         nearbyData.forEach(item => {
                 const popupContent = `
-                <b>${item.Name}</b><br>
-                <span style="color:#4caf50; font-size:0.8em;">${title}から近い</span><br>
-                ${item.Address}<br>
+                <b>${escapeHtml(item.Name)}</b><br>
+                <span style="color:#4caf50; font-size:0.8em;">${escapeHtml(title)}から近い</span><br>
+                ${escapeHtml(item.Address)}<br>
                 <hr style="margin:5px 0; border:none; border-top:1px solid #ccc;">
-                ${item.Description ? item.Description.replace(/\n/g, '<br>') : ''}
-                ${item.URL ? `<br><a href="${item.URL}" target="_blank" class="detail-btn">団の情報をみる</a>` : ''}
+                ${escapeHtmlWithBr(item.Description)}
+                ${item.URL ? `<br><a href="${escapeUrl(item.URL)}" target="_blank" class="detail-btn">団の情報をみる</a>` : ''}
                 `;
                 const marker = L.marker([item._lat, item._lng]).bindPopup(popupContent);
                 markersLayer.addLayer(marker);
